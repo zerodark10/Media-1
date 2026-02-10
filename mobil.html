@@ -1,0 +1,383 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title></title>
+    <script src="js/jquery-3.6.0.min.js"></script>
+    <script src="js/turn.min.js"></script>
+    <script src="js/pdf.min.js"></script>
+   <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div id="flipbook"></div>
+    <div class="loading" id="loading">Cargando PDF...</div>
+    
+    <div class="controls">
+        <button class="control-btn" id="prev-page" disabled>◀</button>
+        
+        <div class="zoom-controls">
+            <button class="zoom-btn" id="zoom-out" disabled>-</button>
+            <button class="zoom-btn" id="zoom-in" disabled>+</button>
+        </div>
+        
+        <div class="page-info">
+            <span id="current-page">0</span>/<span id="total-pages">0</span>
+        </div>
+        
+        <button class="control-btn" id="next-page" disabled>▶</button>
+    </div>
+
+    <script>
+        // Configuración de PDF.js
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+        
+        let pdfDoc = null;
+        let currentPage = 1;
+        let scale = 1.0;
+        let isTurnInitialized = false;
+        let pdfPageSize = { width: 800, height: 600 };
+        
+        // Elementos del DOM
+        const flipbook = document.getElementById('flipbook');
+        const prevPageBtn = document.getElementById('prev-page');
+        const nextPageBtn = document.getElementById('next-page');
+        const zoomInBtn = document.getElementById('zoom-in');
+        const zoomOutBtn = document.getElementById('zoom-out');
+        const currentPageSpan = document.getElementById('current-page');
+        const totalPagesSpan = document.getElementById('total-pages');
+        const loading = document.getElementById('loading');
+        
+        // CONFIGURA AQUÍ LA RUTA DE TU PDF
+        const PDF_PATH = 'pdf/libro.pdf'; // Cambia esta ruta por la de tu PDF
+        
+        // Cargar PDF automáticamente al iniciar
+        window.addEventListener('load', function() {
+            loadPdfFromPath(PDF_PATH);
+        });
+        
+        // Función para cargar PDF desde ruta
+        function loadPdfFromPath(path) {
+            loading.style.display = 'block';
+            
+            pdfjsLib.getDocument(path).promise.then(pdf => {
+                pdfDoc = pdf;
+                currentPage = 1;
+                totalPagesSpan.textContent = pdf.numPages;
+                currentPageSpan.textContent = currentPage;
+                
+                // Obtener el tamaño de la primera página para ajustar el flipbook
+                pdfDoc.getPage(1).then(firstPage => {
+                    const viewport = firstPage.getViewport({ scale: 1.0 });
+                    pdfPageSize = {
+                        width: viewport.width,
+                        height: viewport.height
+                    };
+                    
+                    // Inicializar flipbook con el tamaño del PDF
+                    initFlipbook();
+                    
+                    // Habilitar controles
+                    prevPageBtn.disabled = false;
+                    nextPageBtn.disabled = false;
+                    zoomInBtn.disabled = false;
+                    zoomOutBtn.disabled = false;
+                    
+                    loading.style.display = 'none';
+                });
+                
+            }).catch(error => {
+                console.error('Error al cargar PDF:', error);
+                loading.textContent = 'Error al cargar el PDF. Verifica la ruta.';
+                setTimeout(() => {
+                    loading.style.display = 'none';
+                }, 3000);
+            });
+        }
+        
+        // Inicializar flipbook ajustado al tamaño del PDF
+        function initFlipbook() {
+            // Limpiar flipbook existente
+            flipbook.innerHTML = '';
+            
+            // Calcular tamaño del flipbook basado en el PDF y la ventana
+            const maxWidth = window.innerWidth * 0.95;
+            const maxHeight = window.innerHeight * 0.95;
+            
+            const isMobile = window.innerWidth < 768;
+            const displayMode = isMobile ? 'single' : 'double';
+
+            // Calcular escala para ajustar al viewport
+            const scaleX = isMobile ? maxWidth / pdfPageSize.width : maxWidth / (pdfPageSize.width * 2);
+            const scaleY = maxHeight / pdfPageSize.height;
+            const finalScale = Math.min(scaleX, scaleY, 1.0) * 0.98;
+            
+            const flipbookWidth = isMobile ? pdfPageSize.width * finalScale : pdfPageSize.width * 2 * finalScale;
+            const flipbookHeight = pdfPageSize.height * finalScale;
+            
+            // Agregar páginas al flipbook
+            for (let i = 1; i <= pdfDoc.numPages; i++) {
+                const pageElement = createPageElement(i);
+                flipbook.appendChild(pageElement);
+            }
+            
+            // Si el número de páginas es impar, añadir una página en blanco al final
+            if (pdfDoc.numPages % 2 !== 0) {
+                const blankPage = createPageElement(pdfDoc.numPages + 1, true);
+                flipbook.appendChild(blankPage);
+            }
+            
+            // Inicializar turn.js con configuración para arrastre
+            if (typeof $.fn.turn !== 'undefined') {
+                $('#flipbook').turn({
+                    width: flipbookWidth,
+                    height: flipbookHeight,
+                    autoCenter: true,
+                    display: displayMode,
+                    acceleration: true,
+                    gradients: true,
+                    elevation: 30,
+                    duration: 600,
+                    // Configuración para mejor arrastre
+                    when: {
+                        turning: function(e, page, view) {
+                            // Suavizar el efecto de arrastre
+                        },
+                        turned: function(event, page) {
+                            currentPage = page;
+                            const isMobile = window.innerWidth < 768;
+                            currentPageSpan.textContent = isMobile ? currentPage : Math.ceil(currentPage / 2);
+                            renderVisiblePages();
+                        },
+                        start: function(e, pageObject) {
+                            // Mejorar la respuesta al arrastre
+                        },
+                        end: function(e, pageObject) {
+                            // Finalizar suavemente el arrastre
+                        }
+                    }
+                });
+                isTurnInitialized = true;
+                
+                // Configurar eventos de arrastre mejorados
+                setupDragEvents();
+                
+                // Renderizar páginas iniciales
+                renderVisiblePages();
+            }
+        }
+        
+        // Crear elemento de página
+        function createPageElement(pageNum, isBlank = false) {
+            const pageElement = document.createElement('div');
+            pageElement.className = 'page';
+            pageElement.id = `page-${pageNum}`;
+            
+            if (isBlank) {
+                pageElement.style.backgroundColor = 'white';
+            }
+            
+            return pageElement;
+        }
+        
+        // Configurar eventos de arrastre
+        function setupDragEvents() {
+            let isDragging = false;
+            let startX = 0;
+            let startY = 0;
+            const dragThreshold = 50; // Mínimo píxeles para considerar arrastre
+            
+            // Mouse events para desktop
+            flipbook.addEventListener('mousedown', function(e) {
+                isDragging = true;
+                startX = e.clientX;
+                startY = e.clientY;
+                e.preventDefault();
+            });
+            
+            document.addEventListener('mousemove', function(e) {
+                if (!isDragging || !isTurnInitialized) return;
+                
+                const deltaX = e.clientX - startX;
+                const deltaY = e.clientY - startY;
+                
+                // Solo considerar arrastre horizontal significativo
+                if (Math.abs(deltaX) > dragThreshold && Math.abs(deltaY) < dragThreshold) {
+                    if (deltaX > 0 && currentPage > 1) {
+                        // Arrastre hacia la derecha - página anterior
+                        $('#flipbook').turn('previous');
+                        isDragging = false;
+                    } else if (deltaX < 0 && currentPage < pdfDoc.numPages) {
+                        // Arrastre hacia la izquierda - página siguiente
+                        $('#flipbook').turn('next');
+                        isDragging = false;
+                    }
+                }
+            });
+            
+            document.addEventListener('mouseup', function() {
+                isDragging = false;
+            });
+            
+            // Touch events para mobile
+            flipbook.addEventListener('touchstart', function(e) {
+                isDragging = true;
+                startX = e.touches[0].clientX;
+                startY = e.touches[0].clientY;
+                e.preventDefault();
+            });
+            
+            document.addEventListener('touchmove', function(e) {
+                if (!isDragging || !isTurnInitialized) return;
+                
+                const deltaX = e.touches[0].clientX - startX;
+                const deltaY = e.touches[0].clientY - startY;
+                
+                // Umbral más bajo para touch
+                if (Math.abs(deltaX) > 30 && Math.abs(deltaY) < 50) {
+                    if (deltaX > 0 && currentPage > 1) {
+                        $('#flipbook').turn('previous');
+                        isDragging = false;
+                    } else if (deltaX < 0 && currentPage < pdfDoc.numPages) {
+                        $('#flipbook').turn('next');
+                        isDragging = false;
+                    }
+                }
+            });
+            
+            document.addEventListener('touchend', function() {
+                isDragging = false;
+            });
+            
+            // También permitir clic en zonas laterales
+            flipbook.addEventListener('click', function(e) {
+                if (!isTurnInitialized) return;
+                
+                const rect = flipbook.getBoundingClientRect();
+                const clickX = e.clientX - rect.left;
+                const flipbookWidth = rect.width;
+                
+                // Zona izquierda (20%) - página anterior
+                if (clickX < flipbookWidth * 0.2 && currentPage > 1) {
+                    $('#flipbook').turn('previous');
+                }
+                // Zona derecha (20%) - página siguiente
+                else if (clickX > flipbookWidth * 0.8 && currentPage < pdfDoc.numPages) {
+                    $('#flipbook').turn('next');
+                }
+            });
+        }
+        
+        // Renderizar páginas visibles
+        function renderVisiblePages() {
+            if (!isTurnInitialized) return;
+            
+            const view = $('#flipbook').turn('view');
+            for (let i = 0; i < view.length; i++) {
+                const pageNum = view[i];
+                if (pageNum <= pdfDoc.numPages) {
+                    renderPage(pageNum);
+                }
+            }
+        }
+        
+        // Renderizar página individual
+        function renderPage(pageNum) {
+            if (!pdfDoc || pageNum > pdfDoc.numPages) return;
+            
+            const pageElement = document.getElementById(`page-${pageNum}`);
+            if (!pageElement) return;
+
+            // Limpiar el contenido de la página antes de volver a renderizar
+            pageElement.innerHTML = '';
+            
+            pdfDoc.getPage(pageNum).then(page => {
+                const isMobile = window.innerWidth < 768;
+                // Calcular escala para ajustar al contenedor
+                const pageWidth = isMobile ? flipbook.clientWidth : flipbook.clientWidth / 2;
+                const pageHeight = flipbook.clientHeight;
+                const pageScale = Math.min(pageWidth / pdfPageSize.width, pageHeight / pdfPageSize.height) * 0.95;
+                
+                const viewport = page.getViewport({ scale: pageScale * scale });
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d');
+                
+                canvas.height = viewport.height;
+                canvas.width = viewport.width;
+                
+                pageElement.appendChild(canvas);
+                
+                const renderContext = {
+                    canvasContext: ctx,
+                    viewport: viewport
+                };
+                
+                page.render(renderContext);
+            });
+        }
+        
+        // Navegación
+        function goToPrevPage() {
+            if (currentPage > 1 && isTurnInitialized) {
+                $('#flipbook').turn('previous');
+            }
+        }
+        
+        function goToNextPage() {
+            if (currentPage < pdfDoc.numPages && isTurnInitialized) {
+                $('#flipbook').turn('next');
+            }
+        }
+        
+        // Zoom
+        function zoomIn() {
+            if (scale < 2.0) {
+                scale += 0.1;
+                if (scale > 1.0) {
+                    flipbook.classList.add('zoomed');
+                }
+                renderVisiblePages();
+            }
+        }
+        
+        function zoomOut() {
+            if (scale > 0.5) {
+                scale -= 0.1;
+                if (scale <= 1.0) {
+                    flipbook.classList.remove('zoomed');
+                }
+                renderVisiblePages();
+            }
+        }
+        
+        // Event listeners para controles
+        prevPageBtn.addEventListener('click', goToPrevPage);
+        nextPageBtn.addEventListener('click', goToNextPage);
+        zoomInBtn.addEventListener('click', zoomIn);
+        zoomOutBtn.addEventListener('click', zoomOut);
+        
+        // Ajustar tamaño al redimensionar ventana
+        window.addEventListener('resize', function() {
+            if (pdfDoc && isTurnInitialized) {
+                const maxWidth = window.innerWidth * 0.95;
+                const maxHeight = window.innerHeight * 0.95;
+                
+                const isMobile = window.innerWidth < 768;
+                const displayMode = isMobile ? 'single' : 'double';
+
+                const scaleX = isMobile ? maxWidth / pdfPageSize.width : maxWidth / (pdfPageSize.width * 2);
+                const scaleY = maxHeight / pdfPageSize.height;
+                const finalScale = Math.min(scaleX, scaleY, 1.0) * 0.98;
+                
+                const flipbookWidth = isMobile ? pdfPageSize.width * finalScale : pdfPageSize.width * 2 * finalScale;
+                const flipbookHeight = pdfPageSize.height * finalScale;
+                
+                $('#flipbook').turn('display', displayMode);
+                $('#flipbook').turn('size', flipbookWidth, flipbookHeight);
+                renderVisiblePages();
+            }
+        });
+    </script>
+</body>
+</html>

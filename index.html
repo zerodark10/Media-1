@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mediakit - Influencers</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/turn.js/3/turn.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    
+    <style>
+        :root {
+            --accent-color: #ffffff;
+            --bg-gradient: radial-gradient(circle, #1a1a1a 0%, #020202 100%);
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background: var(--bg-gradient);
+            overflow: hidden;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            height: 100vh;
+        }
+
+      
+        .header-ui {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            padding: 60px 100px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 100;
+            pointer-events: none;
+        }
+
+
+        .title {
+            color: white;
+            margin: 0;
+            font-weight: 700; 
+            letter-spacing: 8px; 
+            text-transform: uppercase;
+            font-size: clamp(24px, 4vw, 42px); 
+            flex-grow: 1;
+            text-align: center;
+            text-shadow: 0 4px 15px rgba(0,0,0,0.5); 
+        }
+
+        .logo-container { pointer-events: auto; }
+
+      
+        #flipbook-container {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+
+        #flipbook {
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+            background: #000;
+        }
+
+        .page {
+            background: #fff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        /* Controles estilo Glassmorphism */
+        .controls {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            padding: 12px 25px;
+            border-radius: 50px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            z-index: 1000;
+            transition: opacity 0.3s ease;
+        }
+
+        .control-btn {
+            background: none;
+            border: none;
+            color: white;
+            cursor: pointer;
+            font-size: 18px;
+            padding: 5px 10px;
+            border-radius: 50%;
+            transition: background 0.2s;
+        }
+
+        .control-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.15); }
+        .control-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+        .page-info {
+            color: white;
+            font-family: monospace;
+            font-size: 14px;
+            border-left: 1px solid rgba(255,255,255,0.2);
+            border-right: 1px solid rgba(255,255,255,0.2);
+            padding: 0 15px;
+            min-width: 60px;
+            text-align: center;
+        }
+
+        .loading {
+            position: fixed;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-weight: 100;
+            letter-spacing: 2px;
+            z-index: 1001;
+        }
+
+        canvas { width: 100%; height: 100%; object-fit: contain; }
+    </style>
+</head>
+<body>
+
+    <div class="header-ui">
+        <div class="logo-container">
+            <img src="img/logo.png" alt="Logo" width="80">
+        </div>
+        <h1 class="title">Influencers Mediakit</h1>
+        <div style="width: 60px"></div> </div>
+
+    <div id="loading" class="loading">INICIALIZANDO...</div>
+
+    <div id="flipbook-container">
+        <div id="flipbook"></div>
+    </div>
+
+    <div class="controls">
+        <button class="control-btn" id="prev-page">◀</button>
+        <button class="control-btn" id="zoom-out">A-</button>
+        <div class="page-info">
+            <span id="current-page">1</span> / <span id="total-pages">0</span>
+        </div>
+        <button class="control-btn" id="zoom-in">A+</button>
+        <button class="control-btn" id="next-page">▶</button>
+    </div>
+
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
+        let pdfDoc = null;
+        let scale = 1.0;
+        const PDF_PATH = 'pdf/Mediakit.pdf'; 
+
+        async function init() {
+            try {
+                pdfDoc = await pdfjsLib.getDocument(PDF_PATH).promise;
+                document.getElementById('total-pages').textContent = pdfDoc.numPages;
+                
+                const firstPage = await pdfDoc.getPage(1);
+                const viewport = firstPage.getViewport({ scale: 1.0 });
+                
+                startFlipbook(viewport.width / viewport.height);
+                document.getElementById('loading').style.display = 'none';
+            } catch (err) {
+                console.error(err);
+                document.getElementById('loading').textContent = "ERROR AL CARGAR PDF";
+            }
+        }
+
+        function startFlipbook(aspectRatio) {
+            const flipbook = $('#flipbook');
+            
+       
+            const w = window.innerWidth * 0.9;
+            const h = window.innerHeight * 0.8;
+            
+            let fbW, fbH;
+            if (w / h > aspectRatio) {
+                fbH = h;
+                fbW = h * aspectRatio;
+            } else {
+                fbW = w;
+                fbH = fbW / aspectRatio;
+            }
+
+         
+            for (let i = 1; i <= pdfDoc.numPages; i++) {
+                flipbook.append(`<div class="page" id="p${i}"></div>`);
+            }
+
+            flipbook.turn({
+                width: fbW,
+                height: fbH,
+                display: 'single',
+                acceleration: true,
+                gradients: true,
+                elevation: 50,
+                when: {
+                    turned: function(e, page) {
+                        document.getElementById('current-page').textContent = page;
+                        render(page);
+                        // Precarga adyacentes
+                        if(page > 1) render(page - 1);
+                        if(page < pdfDoc.numPages) render(page + 1);
+                    }
+                }
+            });
+
+            render(1);
+        }
+
+        async function render(pageNum) {
+            const container = document.getElementById(`p${pageNum}`);
+            if (!container || container.dataset.rendered) return;
+
+            container.dataset.rendered = "true";
+            const page = await pdfDoc.getPage(pageNum);
+            
+            const viewport = page.getViewport({ scale: 2.0 * scale });
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+
+            canvas.height = viewport.height;
+            canvas.width = viewport.width;
+            container.appendChild(canvas);
+
+            await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+        }
+
+        document.getElementById('prev-page').onclick = () => $('#flipbook').turn('previous');
+        document.getElementById('next-page').onclick = () => $('#flipbook').turn('next');
+
+ 
+        document.getElementById('zoom-in').onclick = () => {
+            scale += 0.2;
+            refreshAll();
+        };
+        document.getElementById('zoom-out').onclick = () => {
+            if(scale > 0.6) scale -= 0.2;
+            refreshAll();
+        };
+
+        function refreshAll() {
+            $('.page').removeAttr('data-rendered').empty();
+            render($('#flipbook').turn('page'));
+        }
+
+        $(window).bind('keydown', function(e){
+            if (e.keyCode === 37) $('#flipbook').turn('previous');
+            else if (e.keyCode === 39) $('#flipbook').turn('next');
+        });
+
+        let resizeTimer;
+        $(window).resize(function() {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => location.reload(), 200);
+        });
+
+        init();
+    </script>
+</body>
+</html>
